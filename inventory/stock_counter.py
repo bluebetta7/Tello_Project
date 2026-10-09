@@ -1,6 +1,4 @@
 class StockCounter:
-    """R 키로 현재 수량을 확정하고 직전 집계 수량과 비교한다."""
-
     def __init__(self, confirmation_frames=3):
         self.confirmation_frames = confirmation_frames
         self.candidate = None
