@@ -1,28 +1,48 @@
+import signal
+import sys
 from contextlib import ExitStack
-import time  # [FPS-TEST] 측정 후 삭제
 from pathlib import Path
 
-from drone.video_stream import VideoStream
+from PySide6.QtWidgets import QApplication
+
+from control.auto_scan import AutoScanner
 from control.keyboard_flight import KeyboardFlight
-from inventory.inventory_screen import InventoryScreen
-from inventory.stock_counter import StockCounter
-from inventory.product_detector import ProductDetector
+from control.manual_scan import ManualScanner
 from drone.flight_controller import FlightController
+from drone.video_stream import VideoStream
+from gui.main_window import MainWindow
+from inventory.inventory_screen import InventoryScreen
+from inventory.product_detector import ProductDetector
+from inventory.screen_renderer import ScreenRenderer
+from inventory.shelf_inventory import ShelfInventory
+from inventory.snack_recognizer import SnackRecognizer
+from location.zone_marker import ZoneMarkerDetector
 
 
 # 사용할 가중치 및 인식 기준 설정
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "best_fine.pt"
-MODEL_CONFIDENCE = 0.40
+MODEL_CONFIDENCE = 0.35  # 봉지 1종 모델 기준: 0.40이면 82%, 0.25면 97%의 봉지를 찾음 (녹화 영상 39개)
+MODEL_IMAGE_SIZE = 960  # 텔로 화면 원래 크기. 640보다 멀리 있는 작은 봉지를 잘 찾지만 YOLO가 약 17ms 느림
+# 과자별 등록 사진 폴더 (gui의 "물품 등록"으로 추가)
+GALLERY_DIR = Path(__file__).resolve().parent / "gallery"
 
 
 def main():
-    detector = ProductDetector(MODEL_PATH, confidence=MODEL_CONFIDENCE)
-    counter = StockCounter(confirmation_frames=3)
-    dashboard = InventoryScreen(detector.class_names.values())
+    # 인식
+    detector = ProductDetector(MODEL_PATH, confidence=MODEL_CONFIDENCE, image_size=MODEL_IMAGE_SIZE)
+    zones = ZoneMarkerDetector()
+    recognizer = SnackRecognizer(GALLERY_DIR)
+    # 재고·화면
+    inventory = ShelfInventory(InventoryScreen(detector.class_names.values()))
+    screen = ScreenRenderer(detector, zones, inventory)
+    # 드론·조작
     controller = FlightController()
     camera = VideoStream(controller.tello)
-    manual = KeyboardFlight(controller)
+    keys = KeyboardFlight(controller)
+    manual = ManualScanner(inventory)
+    auto = AutoScanner(controller, keys, inventory)
 
+    app = QApplication(sys.argv)
     try:
         with ExitStack() as cleanup:
             cleanup.callback(controller.disconnect)
@@ -30,47 +50,18 @@ def main():
             cleanup.callback(camera.stop)
             camera.start()
             cleanup.callback(controller.land)
-            cleanup.callback(manual.stop)
-            manual.start()
+            cleanup.callback(keys.stop)
+            # 키 입력은 pynput 대신 Qt 창이 받아서 넘겨준다. (창에 포커스가 있을 때만 조종)
+            keys.start(listen_keyboard=False)
 
-            print("[MODE] SNACK_RECOGNITION_START")
-            print("[KEY] T=takeoff G=land WASD/arrows=move R=count/compare Q/ESC=exit")
-
-            while not manual.exit_requested:
-                if manual.consume_scan_request():
-                    counter.start_scan()
-
-                frame = camera.get_frame()
-
-                # ===== [FPS-TEST] FPS 측정 시작 (측정 후 삭제) =====
-                loop_count += 1
-                total_loops += 1
-                if frame is not last_frame:  # 텔로가 새로 보낸 프레임인지 확인
-                    new_frames += 1
-                    last_frame = frame
-                elapsed = time.monotonic() - fps_start
-                if elapsed >= 1.0:
-                    print(f"[FPS] 처리 {loop_count / elapsed:.1f} | 텔로 수신 {new_frames / elapsed:.1f}")
-                    loop_count = new_frames = 0
-                    fps_start = time.monotonic()
-                # ===== [FPS-TEST] FPS 측정 끝 =====
-
-                detections = detector.detect(frame)
-                live_counts = detector.count_by_class(detections)
-                _, completed = counter.update(live_counts)
-                if completed:
-                    for message, _ in dashboard.add_scan(counter):
-                        print(message)
-
-                title = "LIVE COUNT - COUNTING..." if counter.scanning else "LIVE SNACK INVENTORY"
-                camera_frame = detector.draw(frame.copy(), detections, live_counts, title)
-                camera.show(dashboard.draw(camera_frame, counter, camera.get_window_size()))
-
-            # ===== [FPS-TEST] 전체 평균 출력 (측정 후 삭제) =====
-            total_elapsed = time.monotonic() - total_start
-            if total_elapsed > 0:
-                print(f"[FPS] 전체 평균 처리 {total_loops / total_elapsed:.1f} FPS ({total_elapsed:.0f}초 동안)")
-            # ===== [FPS-TEST] 전체 평균 출력 끝 =====
+            # 인식 → 집계 → 화면 출력 반복은 창의 tick()이 맡는다.
+            # 창을 닫거나 Q·ESC를 누르면 app.exec()가 끝나고 위의 정리(착륙·연결 해제)가 실행된다.
+            window = MainWindow(controller, camera, keys, detector, zones, inventory, screen,
+                                manual, auto, recognizer)
+            # 터미널의 Ctrl+C도 창을 닫는 것과 같게 처리한다.
+            signal.signal(signal.SIGINT, lambda *_: window.close())
+            window.show()
+            app.exec()
 
     except KeyboardInterrupt:
         print("\n[MODE] INTERRUPTED")

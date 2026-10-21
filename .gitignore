@@ -6,3 +6,6 @@ dataset/
 README.md
 models/
 gallery/
+dataset_capture/
+dataset_tools/
+test/
