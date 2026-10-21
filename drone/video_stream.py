@@ -1,36 +1,39 @@
 import cv2
-from AppKit import NSApplication
 
 
 class VideoStream:
     def __init__(self, tello):
         self.tello = tello
         self.frame_read = None
-        self.window = None
+        self.window_open = False
         self.window_name = "Tello Control"
 
     def start(self):
         self.tello.streamon()
         self.frame_read = self.tello.get_frame_read()
 
-    def get_frame(self):
+    def raw_frame(self):
+        # 변환 전 원본. djitellopy는 새 프레임마다 새 배열을 만들므로 `is`로 새 프레임인지 비교할 수 있다.
         return self.frame_read.frame
 
-    def get_window_size(self):
-        if self.window is None:
-            return None
-        size = self.window.contentView().bounds().size
-        return max(1, int(size.width)), max(1, int(size.height))
+    @staticmethod
+    def to_bgr(raw):
+        # djitellopy는 RGB 순서로 프레임을 주므로 OpenCV·YOLO가 쓰는 BGR로 변환한다.
+        return cv2.cvtColor(raw, cv2.COLOR_RGB2BGR)
+
+    def get_frame(self):
+        return self.to_bgr(self.raw_frame())
 
     def show(self, frame):
-        if self.window is None:
+        # OpenCV 창 표시는 학습 데이터 촬영 프로그램에서만 사용한다. (본 프로그램은 Qt 창)
+        if not self.window_open:
             cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-            self.window = next(window for window in NSApplication.sharedApplication().windows()
-                               if window.title() == self.window_name)
+            self.window_open = True
         cv2.imshow(self.window_name, frame)
         cv2.waitKey(1)
 
     def stop(self):
         self.tello.streamoff()
-        cv2.destroyAllWindows()
-        self.window = None
+        if self.window_open:
+            cv2.destroyAllWindows()
+            self.window_open = False
