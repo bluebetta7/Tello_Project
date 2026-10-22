@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
 
-from inventory.inventory_screen import SNACK_NAMES, font
+from inventory.inventory_screen import font
 
 
 class ProductDetector:
@@ -111,7 +111,7 @@ class ProductDetector:
         # 박스 위 라벨: 한글 과자 이름 + 점수 (등록 사진과 대조했으면 닮은 정도, 아니면 YOLO 신뢰도)
         label_font = font(20, True)
         for detection in detections:
-            name = SNACK_NAMES.get(detection["class_name"], detection["class_name"])
+            name = detection["class_name"]
             label = f"{name} {detection.get('match_score', detection['confidence']):.2f}"
             left, top, right, bottom = draw.textbbox((0, 0), label, font=label_font)
             bar_h = bottom + 6  # 글꼴마다 높이가 달라 실제 글자 크기에 맞춘다.
@@ -126,7 +126,7 @@ class ProductDetector:
         if names:
             rows = []
             for name in names:
-                row = f"{SNACK_NAMES.get(name, name)} {counts.get(name, 0)}개"
+                row = f"{name} {counts.get(name, 0)}개"
                 if name in changes:
                     row += f" ({changes[name]:+d})"
                 rows.append((row, (255, 255, 255)))

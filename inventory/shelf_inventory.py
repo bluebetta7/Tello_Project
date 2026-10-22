@@ -1,4 +1,3 @@
-from inventory.inventory_screen import SNACK_NAMES
 from inventory.product_detector import ProductDetector
 from inventory.snack_recognizer import UNKNOWN
 from inventory.stock_counter import StockCounter
@@ -8,11 +7,23 @@ from location.zone_marker import ZoneMarkerDetector, shelf_name
 class ShelfView:
     """한 프레임의 과자 탐지 결과를 매대(마커) 단위로 나눠 보여준다."""
 
-    def __init__(self, detections, markers, frame_height):
+    def __init__(self, detections, markers, frame_height, frame_width=None):
         self.detections = ZoneMarkerDetector.assign_zones(detections, markers)
         self.markers = markers
         self.visible = {marker["id"] for marker in markers}
         self.frame_height = frame_height
+        self.frame_width = frame_width or frame_height * 4 // 3   # 텔로 화면은 4:3
+
+    def marker_info(self, shelf_id=None):
+        """마커의 화면 속 위치와 크기. x·y: 0~1 (왼쪽·위가 0), size: 한 변 길이(픽셀).
+
+        shelf_id를 주면 그 마커, 안 주면 보이는 마커 중 하나. 안 보이면 None.
+        """
+        for marker in self.markers:
+            if shelf_id is None or marker["id"] == shelf_id:
+                return {"x": marker["center"][0] / self.frame_width,
+                        "y": marker["center"][1] / self.frame_height, "size": marker["size"]}
+        return None
 
     def marker_position(self, shelf_id):
         # 마커 중심의 세로 위치. 0 = 화면 맨 위, 1 = 맨 아래. 마커가 안 보이면 None.
@@ -37,7 +48,7 @@ class ShelfView:
     def lines(self, shelf_id):
         # 해당 층에서 탐지 중인 과자를 한 줄에 하나씩. 마커가 안 보이면 빈 목록.
         counts = self.counts(shelf_id) or {}
-        return [f"{SNACK_NAMES.get(name, name)} {count}개" for name, count in sorted(counts.items())]
+        return [f"{name} {count}개" for name, count in sorted(counts.items())]
 
 
 class ShelfInventory:
