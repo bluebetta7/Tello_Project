@@ -1,10 +1,9 @@
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
-from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton,
-                               QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QRadioButton, QSizePolicy, QVBoxLayout, QWidget)
 
-from inventory.inventory_screen import SNACK_NAMES
-from inventory.snack_recognizer import UNKNOWN
+from inventory.snack_recognizer import UNKNOWN, clean_name
 
 
 BOX, SELECTED = QColor("#00c800"), QColor("#ff8c00")
@@ -12,10 +11,20 @@ DRAG_START = 8      # 이 픽셀보다 많이 끌면 클릭이 아니라 직접 
 MIN_BOX = 16        # 직접 그린 박스의 최소 크기 (원본 픽셀)
 
 
-def snack_choices():
-    # 등록할 수 있는 과자 이름 (한글 이름 순). 예전 4종 모델의 대문자 이름과 "미확인"는 뺀다.
-    names = [name for name in SNACK_NAMES if name.islower() and name != UNKNOWN]
-    return sorted(names, key=lambda name: SNACK_NAMES[name])
+def class_for(text, registered):
+    """새 과자 이름으로 입력한 글자를 저장할 클래스(폴더) 이름으로 바꾼다. 쓸 수 없는 이름이면 ValueError.
+
+    입력한 이름이 그대로 폴더 이름이자 화면 이름이 된다. 띄어쓰기 차이만 있는 이름은 같은 과자로 본다.
+    """
+    text = clean_name(" ".join(text.split()))
+    if not text:
+        raise ValueError("과자 이름을 입력해 주세요.")
+    if text in (UNKNOWN, "unknown") or text.startswith(".") or any(c in text for c in '/\\:'):
+        raise ValueError("쓸 수 없는 이름입니다.")
+    for name in registered:
+        if text.replace(" ", "") == name.replace(" ", ""):
+            return name
+    return text
 
 
 class CaptureView(QWidget):
@@ -145,15 +154,23 @@ class RegisterDialog(QDialog):
         guide = QLabel("1. 실시간 화면을 보다가 촬영을 누릅니다.\n"
                        "2. 등록할 봉지의 박스를 클릭합니다.\n"
                        "   박스가 없으면 끌어서 직접 그립니다.\n"
-                       "3. 과자 이름을 고르고 저장합니다.\n\n"
+                       "3. 기존 과자를 고르거나 새 이름을 입력하고\n   저장합니다.\n\n"
                        "각도·거리를 바꿔 2~3장 등록하면\n더 정확해집니다.")
         guide.setObjectName("muted")
         self.capture_button = QPushButton("촬영")
         self.capture_button.clicked.connect(self.toggle_capture)
-        self.names = QComboBox()
-        for name in snack_choices():
-            self.names.addItem(SNACK_NAMES[name], name)
-        self.names.currentIndexChanged.connect(self.update_count)
+        # 등록 방식: 이미 등록된 과자에 사진 추가 / 새 과자 이름 입력
+        self.add_mode = QRadioButton("기존 과자에 추가")
+        self.new_mode = QRadioButton("새 과자 등록")
+        modes = QButtonGroup(self)
+        for button in (self.add_mode, self.new_mode):
+            modes.addButton(button)
+            button.toggled.connect(self.update_mode)
+        self.existing = QComboBox()
+        self.existing.currentIndexChanged.connect(self.update_count)
+        self.new_name = QLineEdit()
+        self.new_name.setPlaceholderText("과자 이름 입력 (예: 허니버터칩)")
+        self.new_name.textChanged.connect(self.update_count)
         self.count_label = QLabel()
         self.count_label.setObjectName("muted")
         self.save_button = QPushButton("저장")
@@ -162,8 +179,8 @@ class RegisterDialog(QDialog):
         self.result_label.setWordWrap(True)
         close_button = QPushButton("닫기")
         close_button.clicked.connect(self.close)
-        for widget in (title, guide, self.capture_button, QLabel("과자 이름"), self.names,
-                       self.count_label, self.save_button, self.result_label):
+        for widget in (title, guide, self.capture_button, self.add_mode, self.existing,
+                       self.new_mode, self.new_name, self.count_label, self.save_button, self.result_label):
             side.addWidget(widget)
         side.addStretch()
         side.addWidget(close_button)
@@ -176,7 +193,8 @@ class RegisterDialog(QDialog):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.show_live)
         self.go_live()
-        self.update_count()
+        self.refresh_existing()
+        (self.add_mode if self.existing.count() else self.new_mode).setChecked(True)
 
     def show_live(self):
         frame, boxes = self.capture()
@@ -204,9 +222,50 @@ class RegisterDialog(QDialog):
         self.result_label.setText(f"봉지 {len(boxes)}개를 찾았습니다." if boxes
                                   else "찾은 봉지가 없습니다. 끌어서 직접 그려 주세요.")
 
+    def refresh_existing(self, select=None):
+        # 사진이 등록된 과자 목록 (이름 순, 등록 사진 수 표시)
+        registered = self.recognizer.registered
+        current = select or self.existing.currentData()
+        self.existing.blockSignals(True)
+        self.existing.clear()
+        for name in sorted(registered, key=str):
+            self.existing.addItem(f"{name} ({registered[name]}장)", name)
+        index = self.existing.findData(current)
+        self.existing.setCurrentIndex(max(0, index))
+        self.existing.blockSignals(False)
+        self.add_mode.setEnabled(self.existing.count() > 0)
+        self.update_count()
+
+    def update_mode(self):
+        self.existing.setEnabled(self.add_mode.isChecked())
+        self.new_name.setEnabled(self.new_mode.isChecked())
+        if self.new_mode.isChecked():
+            self.new_name.setFocus()
+        self.update_count()
+        self.update_buttons()
+
+    def target_name(self):
+        # 저장할 클래스 이름. 새 과자 이름이 비었거나 쓸 수 없으면 ValueError.
+        if self.add_mode.isChecked():
+            return self.existing.currentData()
+        return class_for(self.new_name.text(), self.recognizer.registered)
+
     def update_count(self):
-        name = self.names.currentData()
-        self.count_label.setText(f"등록된 사진 {self.recognizer.registered.get(name, 0)}장")
+        try:
+            name = self.target_name()
+        except ValueError as error:
+            self.count_label.setText(str(error))
+            return
+        if name is None:
+            self.count_label.setText("")
+            return
+        count = self.recognizer.registered.get(name, 0)
+        if self.new_mode.isChecked() and count:
+            self.count_label.setText(f"이미 등록된 과자입니다 · {name} 사진 {count}장에 추가")
+        elif self.new_mode.isChecked():
+            self.count_label.setText(f"새 과자로 등록 · 화면에는 '{name}'(으)로 표시")
+        else:
+            self.count_label.setText(f"등록된 사진 {count}장")
 
     def update_buttons(self):
         self.save_button.setEnabled(not self.view.live and self.view.selected is not None)
@@ -217,17 +276,22 @@ class RegisterDialog(QDialog):
         super().done(result)
 
     def save(self):
-        name, box = self.names.currentData(), self.view.selected
+        box = self.view.selected
         if box is None:
             return
         try:
+            name = self.target_name()
+            if name is None:
+                raise ValueError("과자를 골라 주세요.")
             self.recognizer.register(self.view.frame, box, name)
         except ValueError as error:
             self.result_label.setText(str(error))
             return
-        self.result_label.setText(f"저장했습니다: {SNACK_NAMES[name]}")
-        # 같은 봉지를 두 번 저장하지 않도록 선택을 푼다.
+        self.result_label.setText(f"저장했습니다: {name}")
+        # 같은 봉지를 두 번 저장하지 않도록 선택을 풀고, 방금 과자를 기존 목록에서 골라 둔다.
         self.view.selected = None
         self.view.update()
+        self.new_name.clear()
+        self.refresh_existing(select=name)
+        self.add_mode.setChecked(True)
         self.update_buttons()
-        self.update_count()

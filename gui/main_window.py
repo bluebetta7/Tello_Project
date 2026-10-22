@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderVi
 
 from gui.detection_worker import DetectionWorker
 from gui.register_dialog import RegisterDialog
-from inventory.inventory_screen import SNACK_NAMES
 from inventory.shelf_inventory import ShelfView
 from location.zone_marker import SHELF_MARKERS, shelf_name
 
@@ -55,7 +54,7 @@ MAC_KEYS = {
     0x7D: keyboard.Key.down, 0x7B: keyboard.Key.left, 0x7C: keyboard.Key.right,
 }
 
-AUTO_STATES = {"find": "마커 찾는 중", "align": "높이 맞추는 중", "count": "집계 중", "move": "이동 중"}
+AUTO_STATES = {"find": "마커 찾는 중", "align": "위치 맞추는 중", "count": "집계 중", "move": "이동 중"}
 
 
 def flight_key(event):
@@ -280,7 +279,7 @@ class MainWindow(QMainWindow):
             # 1. 인식 결과를 매대별로 나눈다.
             height, detections, markers, frame = result
             self.capture = (frame, [(d["x1"], d["y1"], d["x2"], d["y2"]) for d in detections])
-            view = ShelfView(detections, markers, height)
+            view = ShelfView(detections, markers, height, frame.shape[1])
             # 2. 집계: 스캔 요청(자동 스캔 중에는 멈춤)과 자동 스캔
             self.manual.update(self.keys.consume_scan_request(), view, blocked=self.auto.active)
             self.auto.update(view)
@@ -386,7 +385,7 @@ class MainWindow(QMainWindow):
         page_names = names[start:start + STOCK_PAGE_SIZE]
         self.table.setRowCount(len(page_names))
         for row, name in enumerate(page_names):
-            self.table.setItem(row, 0, QTableWidgetItem(SNACK_NAMES.get(name, name)))
+            self.table.setItem(row, 0, QTableWidgetItem(name))
             difference = counter.changes.get(name, 0)
             values = (("--", MUTED), ("--", MUTED)) if empty else (
                 (str(counter.confirmed.get(name, 0)), TEXT),
