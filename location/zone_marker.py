@@ -33,6 +33,14 @@ ALIGN_SPEED = 15       # 높이 맞추기 상승 속도 (RC 명령값, 키보드
 ALIGN_TIMEOUT = 8.0    # 이 시간(초) 안에 목표 위치에 못 닿으면 멈추고 그 위치에서 집계한다.
 ALIGN_LOST_SECONDS = 0.5  # 상승 중 마커가 이 시간 넘게 안 보이면 멈추고 다시 찾는다.
 
+# 자동 스캔 중 좌우·거리 유지. 마커가 한 줄로 붙어 있어 좌우로 흘러가면 다음 마커를 놓치고,
+# 거리가 변하면 한 층이 화면에 다 안 담기거나(가까움) 과자를 못 찾는다(멂).
+MARKER_TARGET_X = 0.75       # 마커 중심의 가로 위치 목표 (0 = 왼쪽, 1 = 오른쪽). 마커가 선반 오른쪽에 있으므로
+MARKER_X_TOLERANCE = 0.05    # 목표에서 이만큼(화면 폭의 5%)까지는 맞은 것으로 본다.
+MARKER_SIZE_TOLERANCE = 0.12 # 처음 찾은 마커 크기에서 ±12%까지는 같은 거리로 본다.
+STRAFE_SPEED = 12            # 좌우 맞추기 최대 속도 (RC 명령값)
+DISTANCE_SPEED = 12          # 앞뒤 맞추기 최대 속도 (RC 명령값)
+
 ZONE_NAMES = {marker_id: info["name"] for marker_id, info in SHELF_MARKERS.items()}
 
 
